@@ -36,6 +36,7 @@ namespace IMGCatalog
             //?? why not just update with new by comparing?
             //it may be quicker to just insert than read file and DB and compare
             //Todo analyze this
+            await collection.Indexes.CreateOneAsync(Builders<CatalogObject>.IndexKeys.Ascending(_ => _.AltCode));
             var catalogs = new List<Catalog>();
             var vhos = new List<Task<bool>>();
             for(int j=1;j <=15; j++)

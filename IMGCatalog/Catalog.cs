@@ -28,7 +28,7 @@ namespace IMGCatalog
             
             Dictionary<string, CatalogObject> vho = new Dictionary<string, CatalogObject>();
 
-            string path = GetTemplate(vhoNumber, "d:\\img\\img\\", new DateTime(2015, 6, 17));
+            string path = GetTemplate(vhoNumber, "d:\\img\\img\\", new DateTime(2015, 7, 21));
             if (path != string.Empty)
             {
                 Console.ForegroundColor = ConsoleColor.Red;
@@ -37,7 +37,7 @@ namespace IMGCatalog
                 try
                 {
                     String tempFile = Decompress(path);
-                    using (System.IO.StreamReader file = new System.IO.StreamReader(tempFile, Encoding.UTF8))
+                    using (StreamReader file = new System.IO.StreamReader(tempFile, Encoding.UTF8))
                     {
                         string line;
                         while ((line = await file.ReadLineAsync()) != null)
@@ -50,12 +50,12 @@ namespace IMGCatalog
                                 {
                                     //Use the PID PAID since the AltCode is missing
                                     json.AltCode = json.ProviderID + ":" + json.ProviderAssetID.Substring(4);
-                                    AddMedia(vho, json);
+                                    await AddMediaAsync(collection, json);
                                 }
                             }
                             else if (multiScreen)
                             {
-                                AddMedia(vho, json);
+                                await AddMediaAsync(collection, json);
                             }
                         }
                     }
@@ -65,53 +65,72 @@ namespace IMGCatalog
                     Console.WriteLine("Exception caught opening file :" + ex.Message);
                 }
             }
+                //and Upsert the vho!
+                //await collection.InsertManyAsync(vho.Values);
+            return true;
+        }
+        public async Task AddMediaAsync(MongoDB.Driver.IMongoCollection<CatalogObject> collection, CatalogObject json)
+        {
             try
             {
-                //and Upsert the vho!
-                await collection.InsertManyAsync(vho.Values);
+                //var found = vho.TryGetValue(json.AltCode, out r);
+                var filter = Builders<CatalogObject>.Filter.Eq("AltCode", json.AltCode);
+                var found = await collection.Find(filter).ToListAsync();
+
+                if (found.Count > 0)
+                {
+                    //check to see if its an exact copy, if it is then skip
+                    var r = found[0];
+                    if (r.GetHashCode() != json.GetHashCode())
+                    {
+                        if (json.IsHD)//only add values/updates from the HD version
+                        {
+                            //vho[json.AltCode] = json;
+                            if (null != collection.Find(json.AltCode))
+                            {
+                                await collection.ReplaceOneAsync(x => x.AltCode == json.AltCode, json);
+                            }
+                            else
+                            {
+                                await collection.InsertOneAsync(json);
+                            }
+                            Compare(r, json);
+                        }
+                        else
+                        {
+                            //need to Add Avails data for nonHD here which requires making the private fields into a list of...
+                        }
+                    }
+                }
+                else
+                {
+                    //Not this is unusual and an error
+                    //So possible outcome here is we have same content but first four chars dont match, but content is same
+                    //var dict = vho.Where(kvp => json.ProviderAssetID.Substring(4)).SelectMany(kvp => kvp.Value);
+                    //var dict = vho.SelectMany(m => m).Where(k => vho.Keys.Contains(json.ProviderAssetID.Substring(4)));
+                    /*var selectValues = (from keyValuePair in vho
+                                        where keyValuePair.Key.Contains(json.ProviderAssetID.Substring(4))
+                                        select keyValuePair.Value).ToList();
+                    if (selectValues.Count > 1)
+                        Console.WriteLine(vhoNumber + " : " + json.AltCode);
+                    */
+                    //vho[json.AltCode] = json;
+                    if (null == collection.Find(json.AltCode))
+                    {
+                        await collection.ReplaceOneAsync(x => x.AltCode == json.AltCode, json);
+                    }
+                    else
+                    {
+                        await collection.InsertOneAsync(json);
+                    }
+                    
+                }
             }
             catch (Exception ex)
             {
                 Console.WriteLine(ex.Message);
-                return false;
             }
-            return true;
-        }
-        public Dictionary<string, CatalogObject> AddMedia(Dictionary<string, CatalogObject> vho, CatalogObject json)
-        {
-            CatalogObject r = new CatalogObject();
-            var found = vho.TryGetValue(json.AltCode, out r);
-            if (found)
-            {
-                //check to see if its an exact copy, if it is then skip
-                if (r.GetHashCode() != json.GetHashCode())
-                {
-                    if (json.IsHD)//only add values/updates from the HD version
-                    {
-                        vho[json.AltCode] = json;
-                        Compare(r, json);
-                    }
-                    else
-                    {
-                        //need to Add Avails data for nonHD here which requires making the private fields into a list of...
-                    }
-                }
-            }
-            else
-            {
-                //Not this is unusual and an error
-                //So possible outcome here is we have same content but first four chars dont match, but content is same
-                //var dict = vho.Where(kvp => json.ProviderAssetID.Substring(4)).SelectMany(kvp => kvp.Value);
-                //var dict = vho.SelectMany(m => m).Where(k => vho.Keys.Contains(json.ProviderAssetID.Substring(4)));
-                var selectValues = (from keyValuePair in vho
-                                    where keyValuePair.Key.Contains(json.ProviderAssetID.Substring(4))
-                                    select keyValuePair.Value).ToList();
-                if (selectValues.Count > 1)
-                    Console.WriteLine(vhoNumber + " : " + json.AltCode);
-                vho[json.AltCode] = json;
-            }
-            return vho;
-        }
+        }    
         /// <summary>
         /// getTemplate returns a file name convention 
         /// for a specific vho on a spcecific date
